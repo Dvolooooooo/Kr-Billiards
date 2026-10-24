@@ -3910,14 +3910,14 @@ local function startAuto(preview)
 					add({angle = seed.angle + d, power = math.clamp(seed.power * scale, 0.05, 1), side = spin, top = d * 0.8, cue = seed.cue})
 				end
 			end
-		elseif style == "attack" then
-			-- 공격형: 포기하지 않고 직선·쿠션·강타·회전 루트를 넓게 전부 탐색합니다.
+		elseif style == "attack" or style == "art" then
+			-- 공격형·예술당구형: 기본 공격 루트는 동일하게 전부 탐색합니다.
 			local baseAngle = seed and seed.angle or 0
 			local baseCue = seed and seed.cue or nil
-			local powers = {0.20, 0.32, 0.46, 0.62, 0.78, 0.92, 1.0}
+			local powers = style == "art" and {0.28, 0.46, 0.66, 0.86, 1.0} or {0.20, 0.32, 0.46, 0.62, 0.78, 0.92, 1.0}
 			local spins = {{0, 0.10}, {0, 0.32}, {0.22, 0.22}, {-0.22, 0.22}, {0.42, -0.28}, {-0.42, -0.28}}
-			for index = 0, 71 do
-				local angle = baseAngle + index * math.pi * 2 / 72
+			for index = 0, (style == "art" and 35 or 71) do
+				local angle = baseAngle + index * math.pi * 2 / (style == "art" and 36 or 72)
 				for _, power in ipairs(powers) do
 					for _, spin in ipairs(spins) do add({angle = angle, power = power, side = spin[1], top = spin[2], cue = baseCue}) end
 				end
@@ -3926,6 +3926,22 @@ local function startAuto(preview)
 				for _, scale in ipairs({1.05, 1.18, 1.32, 1.48}) do
 					for _, d in ipairs({-0.035, -0.018, 0, 0.018, 0.035}) do
 						add({angle = seed.angle + d, power = math.clamp(seed.power * scale, 0.08, 1), side = seed.side, top = math.max(seed.top, 0.12), cue = seed.cue})
+					end
+				end
+			end
+			if style == "art" then
+				-- 극단 회전·끌어치기·밀어치기·두께 변화·쿠션 각도를 추가 탐색합니다.
+				local artSpins = {{0, 0.72}, {0, -0.72}, {0.72, 0.35}, {-0.72, 0.35}, {0.58, -0.58}, {-0.58, -0.58}}
+				local artPowers = {0.30, 0.48, 0.68, 0.88}
+				for index = 0, 47 do
+					local angle = baseAngle + index * math.pi * 2 / 48
+					for _, power in ipairs(artPowers) do
+						for _, spin in ipairs(artSpins) do add({angle = angle, power = power, side = spin[1], top = spin[2], cue = baseCue, ArtShot = true}) end
+					end
+				end
+				if seed then
+					for _, d in ipairs({-0.22, -0.12, 0.12, 0.22}) do
+						for _, spin in ipairs(artSpins) do add({angle = seed.angle + d, power = math.clamp(seed.power * 1.08, 0.08, 1), side = spin[1], top = spin[2], cue = seed.cue, ArtShot = true}) end
 					end
 				end
 			end
@@ -3992,10 +4008,18 @@ local function startAuto(preview)
 					score = score + continuation * 1250 - opponentPenalty + plan.VerifiedScore * 720 + routeValue
 					plan.OpponentReply, plan.DangerousReply = opponentThreat, dangerousReply
 					plan.Strategy = dangerousReply and "Alien 상대 득점 차단" or (opponentThreat > continuation and "Alien 반격 차단" or "Alien 공격·연속득점")
-				elseif style == "attack" then
-					-- 공격형: 상대 방어 평가는 버리고 내 득점·승리·연속 공격만 극대화합니다.
+				elseif style == "attack" or style == "art" then
+					-- 예술당구형도 공격형과 동일한 득점 평가를 기본으로 사용합니다.
 					local attackValue = (plan.VerifiedWinner == s.turn and 250000 or 0) + plan.VerifiedScore * 9000 + own * 6500
 					score = score + attackValue + plan.power * 420 + math.abs(plan.side or 0) * 80 + math.abs(plan.top or 0) * 60
+					if style == "art" then
+						local technique = math.abs(plan.side or 0) * 520 + math.abs(plan.top or 0) * 460 + math.abs(plan.power - 0.55) * 180
+						local flourish = math.abs(math.sin(plan.angle * 5.7 + (plan.side or 0) * 8.3 + (plan.top or 0) * 6.1))
+						score = score + technique + flourish * 115 + (plan.ArtShot and 180 or 0)
+						plan.Strategy = "예술당구 기술구·예술구 공격 루트"
+					else
+						plan.Strategy = "공격형 전력 득점 루트"
+					end
 					plan.Strategy = "공격형 전력 득점 루트"
 				elseif style == "defense" then
 					-- 득점 가능한 수는 먼저 선택하고, 득점이 어려울 때만 비예측 수비로 전환합니다.
@@ -4318,7 +4342,7 @@ local function startAuto(preview)
 		selectedRemote:FireServer("sync")
 	end
 	function state.SetStyle(value)
-		local styles = {basic = {name = "기본형", level = 4, think = 10}, balanced = {name = "균형형", level = 4, think = 10}, chess = {name = "체스형", level = 5, think = 14}, alien = {name = "Alien", level = 5, think = 15}, attack = {name = "공격형", level = 6, think = 15}, defense = {name = "방어형", level = 5, think = 13}}
+		local styles = {basic = {name = "기본형", level = 4, think = 10}, balanced = {name = "균형형", level = 4, think = 10}, chess = {name = "체스형", level = 5, think = 14}, alien = {name = "Alien", level = 5, think = 15}, attack = {name = "공격형", level = 6, think = 15}, art = {name = "예술당구형", level = 5, think = 6}, defense = {name = "방어형", level = 5, think = 13}}
 		local preset = styles[value] or styles.balanced
 		state.Style = styles[value] and value or "balanced"
 		state.StyleName, state.Level, state.ThinkSeconds = preset.name, preset.level, preset.think
@@ -4667,11 +4691,11 @@ local function startAuto(preview)
 		styles:Label({Id = "style-info", Text = "스타일은 후보 생성과 득점·수비 평가에 반영됩니다."})
 		styles:Dropdown({Id = "play-style", Text = "플레이 스타일", Placeholder = "스타일 선택", Default = "basic", Options = {
 			{Value = "balanced", Label = "균형형 · 득점과 수비"}, {Value = "chess", Label = "체스형 · 다음 수까지 계산"},
-			{Value = "basic", Label = "기본형 · 원본 자동플레이"}, {Value = "alien", Label = "Alien · 연속득점·상대차단"}, {Value = "attack", Label = "공격형 · 최대 득점"}, {Value = "defense", Label = "방어형 · 혼란·득점 차단"}},
+			{Value = "basic", Label = "기본형 · 원본 자동플레이"}, {Value = "alien", Label = "Alien · 연속득점·상대차단"}, {Value = "attack", Label = "공격형 · 최대 득점"}, {Value = "art", Label = "예술당구형 · 기술구·예술구"}, {Value = "defense", Label = "방어형 · 혼란·득점 차단"}},
 			Callback = state.SetStyle})
 		styles:Slider({Id = "think-seconds", Text = "계산 시간", Min = 3, Max = 15, Step = 1, Default = state.ThinkSeconds, Suffix = "초", Persist = false, OnCommit = function(v) state.ThinkSeconds = v end})
 		styles:Toggle({Id = "deep-search", Text = "후속 수까지 깊게 탐색", Default = true, Persist = false, Callback = function(v) state.StrongPlay = v == true end})
-		styles:Label({Id = "style-note", Text = "기본형은 원본 자동플레이 계산을 사용합니다. 공격형은 득점 루트를 전부 탐색하고 공격만 극대화합니다. Alien·방어형은 별도 전략을 사용합니다."})
+		styles:Label({Id = "style-note", Text = "기본형은 원본 자동플레이 계산을 사용합니다. 공격형은 득점 루트를 전부 탐색하고, 예술당구형은 스피드게임용으로 압축 탐색하면서 기술구·예술구 후보를 추가합니다. Alien·방어형은 별도 전략을 사용합니다."})
 
 		local settings = window:Tab({Id = "settings", Title = "설정"}):Section({Title = "GUI 크기·배율"})
 		settings:Label({Id = "settings-info", Text = "배율을 줄이면 글자·버튼·클릭 영역·간격이 함께 줄어듭니다."})
