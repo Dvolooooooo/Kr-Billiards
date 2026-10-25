@@ -3958,6 +3958,18 @@ local function startAuto(preview)
 		if budget < 0.2 then return nil, "계산할 차례 시간이 부족합니다" end
 		local deadline = started + budget
 		local artFactor = math.clamp(((state.ThinkSeconds or 6) - 3) / 12, 0, 1)
+		local finishWindow = false
+		if s.PoolMode then
+			local live = 0
+			for i = 2, 16 do if s.balls[i] and not s.balls[i].pocketed then live = live + 1 end end
+			finishWindow = live <= 2
+		else
+			local target = s.targetScore or (s.rules and s.rules.target) or 10
+			local current = s.scores and tonumber(s.scores[s.turn]) or 0
+			local finalThree = s.finalThreeCushion and s.finalThreeCushion[s.turn] == true
+			-- 3구·4구·3쿠션 모두 목표점수 1점 전 또는 마지막 3쿠션 상태를 마무리로 봅니다.
+			finishWindow = target - current <= 1 or finalThree
+		end
 		local function hardCancel() return not alive or (cancelled and cancelled()) end
 		local function exhausted() return hardCancel() or os.clock() >= deadline end
 		local function seedPlan(limit, selectedState)
@@ -4039,6 +4051,15 @@ local function startAuto(preview)
 				elseif state.StrongPlay then
 					score = score + own * 120 - opponent * (plan.VerifiedScore > 0 and 15 or 220)
 				end
+				if finishWindow then
+					local finishScore = plan.VerifiedScore > 0 or plan.VerifiedWinner == s.turn
+					local complexity = math.abs(plan.side or 0) * 1800 + math.abs(plan.top or 0) * 1600 + math.abs((plan.power or 0.5) - 0.62) * 900 + (plan.ArtShot and 1400 or 0)
+					if finishScore then
+						score = score + 90000 - complexity
+					else
+						score = score - 45000 - complexity * 0.25
+					end
+				end
 				score = score - plan.power * 2 - math.abs(plan.side) * 0.8
 				table.insert(finalists, {Plan = plan, State = nextState, Value = score, Own = own, Opponent = opponent})
 				if not state.StrongPlay then break end
@@ -4046,6 +4067,20 @@ local function startAuto(preview)
 		end
 		if hardCancel() then return nil, "경기 상태 변경으로 계산 취소" end
 		if #finalists == 0 then return nil, "제한시간 안에 검증된 합법 타격을 찾지 못했습니다" end
+		if finishWindow then
+			-- 마무리에서는 득점 후보가 하나라도 있으면 무득점 후보를 절대 선택하지 않습니다.
+			local scoring = {}
+			for _, item in ipairs(finalists) do
+				local p = item.Plan
+				local scored = p.VerifiedScore > 0 or p.VerifiedWinner == s.turn
+				if scored then
+					p.FinishScored = true
+					item.Value = item.Value - (item.Opponent or 0) * 50000
+					table.insert(scoring, item)
+				end
+			end
+			if #scoring > 0 then finalists = scoring end
+		end
 		table.sort(finalists, function(a, b) return a.Value > b.Value end)
 		local legalCount = #finalists
 		local deeper, robustChecks = 0, 0
@@ -4102,7 +4137,7 @@ local function startAuto(preview)
 		if hardCancel() then return nil, "경기 상태 변경으로 계산 취소" end
 		table.sort(finalists, function(a, b) return a.Value > b.Value end)
 		local best = finalists[1]
-		if state.Style ~= "art" or best.Plan.VerifiedScore <= 0 then best.Plan.Strategy = best.Plan.VerifiedWinner == s.turn and "승리 경로" or (best.Plan.VerifiedScore > 0 and "득점·다음 배치" or "상대 기회 억제 수비") end
+		if state.Style ~= "art" or best.Plan.VerifiedScore <= 0 then best.Plan.Strategy = best.Plan.VerifiedWinner == s.turn and (finishWindow and "안정적 마무리 득점·상대 기회 차단" or "승리 경로") or (best.Plan.VerifiedScore > 0 and "득점·다음 배치" or "상대 기회 억제 수비") end
 		best.Plan.SearchCandidates, best.Plan.SearchSeconds = checked, os.clock() - started
 		state.LastSearch = {Candidates = checked, Legal = legalCount, NextChecks = deeper, RobustChecks = robustChecks, Seconds = os.clock() - started,
 			Strategy = best.Plan.Strategy, NextQuality = best.Own, OpponentThreat = best.Opponent}
