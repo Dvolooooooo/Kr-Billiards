@@ -3914,10 +3914,12 @@ local function startAuto(preview)
 			-- 공격형·예술당구형: 기본 공격 루트는 동일하게 전부 탐색합니다.
 			local baseAngle = seed and seed.angle or 0
 			local baseCue = seed and seed.cue or nil
-			local powers = style == "art" and {0.28, 0.46, 0.66, 0.86, 1.0} or {0.20, 0.32, 0.46, 0.62, 0.78, 0.92, 1.0}
+				local artFactor = math.clamp(((state.ThinkSeconds or 6) - 3) / 12, 0, 1)
+				local artSteps = math.floor(36 + artFactor * 72)
+				local powers = style == "art" and {0.24, 0.40, 0.56, 0.70, 0.84, 0.94} or {0.20, 0.32, 0.46, 0.62, 0.78, 0.92, 1.0}
 			local spins = {{0, 0.10}, {0, 0.32}, {0.22, 0.22}, {-0.22, 0.22}, {0.42, -0.28}, {-0.42, -0.28}}
-			for index = 0, (style == "art" and 35 or 71) do
-				local angle = baseAngle + index * math.pi * 2 / (style == "art" and 36 or 72)
+				for index = 0, (style == "art" and artSteps - 1 or 71) do
+				local angle = baseAngle + index * math.pi * 2 / (style == "art" and artSteps or 72)
 				for _, power in ipairs(powers) do
 					for _, spin in ipairs(spins) do add({angle = angle, power = power, side = spin[1], top = spin[2], cue = baseCue}) end
 				end
@@ -3931,16 +3933,16 @@ local function startAuto(preview)
 			end
 			if style == "art" then
 				-- 극단 회전·끌어치기·밀어치기·두께 변화·쿠션 각도를 추가 탐색합니다.
-				local artSpins = {{0, 0.72}, {0, -0.72}, {0.72, 0.35}, {-0.72, 0.35}, {0.58, -0.58}, {-0.58, -0.58}}
-				local artPowers = {0.30, 0.48, 0.68, 0.88}
-				for index = 0, 47 do
-					local angle = baseAngle + index * math.pi * 2 / 48
+					local artSpins = {{0, 0.72}, {0, -0.72}, {0.72, 0.35}, {-0.72, 0.35}, {0.58, -0.58}, {-0.58, -0.58}, {0.38, 0.78}, {-0.38, 0.78}}
+					local artPowers = artFactor > 0.55 and {0.24, 0.38, 0.52, 0.66, 0.80, 0.92} or {0.30, 0.48, 0.68, 0.88}
+					for index = 0, math.floor(48 + artFactor * 48) - 1 do
+					local angle = baseAngle + index * math.pi * 2 / math.floor(48 + artFactor * 48)
 					for _, power in ipairs(artPowers) do
 						for _, spin in ipairs(artSpins) do add({angle = angle, power = power, side = spin[1], top = spin[2], cue = baseCue, ArtShot = true}) end
 					end
 				end
 				if seed then
-					for _, d in ipairs({-0.22, -0.12, 0.12, 0.22}) do
+					for _, d in ipairs({-0.28, -0.16, -0.08, 0.08, 0.16, 0.28}) do
 						for _, spin in ipairs(artSpins) do add({angle = seed.angle + d, power = math.clamp(seed.power * 1.08, 0.08, 1), side = spin[1], top = spin[2], cue = seed.cue, ArtShot = true}) end
 					end
 				end
@@ -3955,6 +3957,7 @@ local function startAuto(preview)
 		local budget = math.max(0, math.min(state.ThinkSeconds, remaining))
 		if budget < 0.2 then return nil, "계산할 차례 시간이 부족합니다" end
 		local deadline = started + budget
+		local artFactor = math.clamp(((state.ThinkSeconds or 6) - 3) / 12, 0, 1)
 		local function hardCancel() return not alive or (cancelled and cancelled()) end
 		local function exhausted() return hardCancel() or os.clock() >= deadline end
 		local function seedPlan(limit, selectedState)
@@ -4013,14 +4016,15 @@ local function startAuto(preview)
 					local attackValue = (plan.VerifiedWinner == s.turn and 250000 or 0) + plan.VerifiedScore * 9000 + own * 6500
 					score = score + attackValue + plan.power * 420 + math.abs(plan.side or 0) * 80 + math.abs(plan.top or 0) * 60
 					if style == "art" then
-						local technique = math.abs(plan.side or 0) * 520 + math.abs(plan.top or 0) * 460 + math.abs(plan.power - 0.55) * 180
+						local verifiedScore = plan.VerifiedScore > 0 or plan.VerifiedWinner == s.turn
+						local technique = math.abs(plan.side or 0) * (300 + artFactor * 520) + math.abs(plan.top or 0) * (260 + artFactor * 480)
 						local flourish = math.abs(math.sin(plan.angle * 5.7 + (plan.side or 0) * 8.3 + (plan.top or 0) * 6.1))
-						score = score + technique + flourish * 115 + (plan.ArtShot and 180 or 0)
-						plan.Strategy = "예술당구 기술구·예술구 공격 루트"
+						local artBonus = verifiedScore and math.min(technique + flourish * (80 + artFactor * 180) + (plan.ArtShot and (100 + artFactor * 260) or 0), 1500 + artFactor * 2200) or -18000
+						score = score + artBonus
+						plan.Strategy = verifiedScore and "예술당구 기술구·예술구 득점 루트" or "득점 우선 · 예술구 보류"
 					else
 						plan.Strategy = "공격형 전력 득점 루트"
 					end
-					plan.Strategy = "공격형 전력 득점 루트"
 				elseif style == "defense" then
 					-- 득점 가능한 수는 먼저 선택하고, 득점이 어려울 때만 비예측 수비로 전환합니다.
 					local canScore = plan.VerifiedScore > 0 or own > 0.34
@@ -4098,7 +4102,7 @@ local function startAuto(preview)
 		if hardCancel() then return nil, "경기 상태 변경으로 계산 취소" end
 		table.sort(finalists, function(a, b) return a.Value > b.Value end)
 		local best = finalists[1]
-		best.Plan.Strategy = best.Plan.VerifiedWinner == s.turn and "승리 경로" or (best.Plan.VerifiedScore > 0 and "득점·다음 배치" or "상대 기회 억제 수비")
+		if state.Style ~= "art" or best.Plan.VerifiedScore <= 0 then best.Plan.Strategy = best.Plan.VerifiedWinner == s.turn and "승리 경로" or (best.Plan.VerifiedScore > 0 and "득점·다음 배치" or "상대 기회 억제 수비") end
 		best.Plan.SearchCandidates, best.Plan.SearchSeconds = checked, os.clock() - started
 		state.LastSearch = {Candidates = checked, Legal = legalCount, NextChecks = deeper, RobustChecks = robustChecks, Seconds = os.clock() - started,
 			Strategy = best.Plan.Strategy, NextQuality = best.Own, OpponentThreat = best.Opponent}
@@ -4668,19 +4672,45 @@ local function startAuto(preview)
 		window = UI:CreateWindow({Id = "billiards-suite", Title = "당구 통합 도우미",
 			Subtitle = "포켓볼·3구·4구 자동 감지 · 예상 경로 · 자동 플레이", Theme = "Crystal", Locale = "ko",
 			CloseBehavior = "Minimize", Width = 540, Height = 540})
+		local loadingSettings = true
+		local settingsPath = "Billiards/autoplay_settings.json"
+		local savedSettings = {}
+		local HttpService = game:GetService("HttpService")
+		local function loadSettings()
+			local read = (getgenv and getgenv().readfile) or readfile
+			if type(read) ~= "function" then return end
+			local ok, raw = pcall(read, settingsPath)
+			if ok and type(raw) == "string" then
+				local decoded, data = pcall(HttpService.JSONDecode, HttpService, raw)
+				if decoded and type(data) == "table" then savedSettings = data end
+			end
+		end
+		local function saveSettings()
+			if loadingSettings or not window or not window.Alive then return end
+			local write = (getgenv and getgenv().writefile) or writefile
+			local make = (getgenv and getgenv().makefolder) or makefolder
+			if type(write) ~= "function" or type(make) ~= "function" then return end
+			pcall(make, "Billiards")
+			local g = window:GetGeometry()
+			local data = {version = 1, enabled = state.Enabled == true, preview = preview.Enabled == true, strongPlay = state.StrongPlay == true, smoothCue = state.SmoothCue == true, humanThinking = state.HumanThinking == true, style = state.Style, thinkSeconds = state.ThinkSeconds,
+				background = backdropTheme, guiScale = window.TextScale, geometry = {width = g.width, height = g.height, x = g.x, y = g.y}}
+			local ok, raw = pcall(HttpService.JSONEncode, HttpService, data)
+			if ok then pcall(write, settingsPath, raw) end
+		end
+		loadSettings()
 		pcall(buildBackdrop, "Crystal")
 		local section = window:Tab({Id = "main", Title = "당구 도우미"}):Section({Title = "경로 표시와 자동 플레이"})
 		modeLabel = section:Label({Id = "mode", Text = "포켓볼·3구·4구 모드 확인 중"})
-		section:Toggle({Id = "preview", Text = "예상 경로 표시", Default = true, Persist = false, Callback = preview.SetEnabled})
+		section:Toggle({Id = "preview", Text = "예상 경로 표시", Default = savedSettings.preview ~= false, Persist = false, Callback = function(v) preview.SetEnabled(v); saveSettings() end})
 		toggle = section:Toggle({Id = "enabled", Text = "자동 플레이", Default = false,
-			Persist = false, Callback = state.SetEnabled})
+			Persist = true, Callback = function(v) state.SetEnabled(v); saveSettings() end})
 		section:Label({Id = "shot-policy", Text = "득점·다음 수·수비를 비교 · 검증된 유효 타격 실행"})
-		section:Toggle({Id = "strong-play", Text = "다음 수와 수비까지 비교", Default = true, Persist = false,
-			Callback = function(v) state.StrongPlay = v == true end})
-		section:Toggle({Id = "smooth-cue", Text = "큐대 부드럽게 이동", Default = true, Persist = false,
-			Callback = state.SetSmoothCue})
-		section:Toggle({Id = "human-thinking", Text = "방향을 고민하는 동작", Default = true, Persist = false,
-			Callback = function(v) state.HumanThinking = v == true end})
+		section:Toggle({Id = "strong-play", Text = "다음 수와 수비까지 비교", Default = savedSettings.strongPlay ~= false, Persist = false,
+			Callback = function(v) state.StrongPlay = v == true; saveSettings() end})
+		section:Toggle({Id = "smooth-cue", Text = "큐대 부드럽게 이동", Default = savedSettings.smoothCue ~= false, Persist = false,
+			Callback = function(v) state.SetSmoothCue(v); saveSettings() end})
+		section:Toggle({Id = "human-thinking", Text = "방향을 고민하는 동작", Default = savedSettings.humanThinking ~= false, Persist = false,
+			Callback = function(v) state.HumanThinking = v == true; saveSettings() end})
 		statusLabel = section:Label({Id = "status", Text = state.Status})
 		statsLabel = section:Label({Id = "stats", Text = "타격 0회 · 서버 확인 0회"})
 		section:Button({Id = "sync", Text = "경기 상태 다시 조회", ActionText = "조회",
@@ -4689,34 +4719,44 @@ local function startAuto(preview)
 
 		local styles = window:Tab({Id = "styles", Title = "당구 스타일"}):Section({Title = "자동플레이 전략 프리셋"})
 		styles:Label({Id = "style-info", Text = "스타일은 후보 생성과 득점·수비 평가에 반영됩니다."})
-		styles:Dropdown({Id = "play-style", Text = "플레이 스타일", Placeholder = "스타일 선택", Default = "basic", Options = {
+		styles:Dropdown({Id = "play-style", Text = "플레이 스타일", Placeholder = "스타일 선택", Default = savedSettings.style or state.Style or "balanced", Persist = true, Options = {
 			{Value = "balanced", Label = "균형형 · 득점과 수비"}, {Value = "chess", Label = "체스형 · 다음 수까지 계산"},
 			{Value = "basic", Label = "기본형 · 원본 자동플레이"}, {Value = "alien", Label = "Alien · 연속득점·상대차단"}, {Value = "attack", Label = "공격형 · 최대 득점"}, {Value = "art", Label = "예술당구형 · 기술구·예술구"}, {Value = "defense", Label = "방어형 · 혼란·득점 차단"}},
-			Callback = state.SetStyle})
-		styles:Slider({Id = "think-seconds", Text = "계산 시간", Min = 3, Max = 15, Step = 1, Default = state.ThinkSeconds, Suffix = "초", Persist = false, OnCommit = function(v) state.ThinkSeconds = v end})
-		styles:Toggle({Id = "deep-search", Text = "후속 수까지 깊게 탐색", Default = true, Persist = false, Callback = function(v) state.StrongPlay = v == true end})
-		styles:Label({Id = "style-note", Text = "기본형은 원본 자동플레이 계산을 사용합니다. 공격형은 득점 루트를 전부 탐색하고, 예술당구형은 스피드게임용으로 압축 탐색하면서 기술구·예술구 후보를 추가합니다. Alien·방어형은 별도 전략을 사용합니다."})
+			Callback = function(v) state.SetStyle(v); saveSettings() end})
+		styles:Slider({Id = "think-seconds", Text = "계산 시간", Min = 3, Max = 15, Step = 1, Default = savedSettings.thinkSeconds or state.ThinkSeconds, Suffix = "초", Persist = true, OnCommit = function(v) state.ThinkSeconds = v; saveSettings() end})
+		styles:Toggle({Id = "deep-search", Text = "후속 수까지 깊게 탐색", Default = savedSettings.strongPlay ~= false, Persist = false, Callback = function(v) state.StrongPlay = v == true; saveSettings() end})
+		styles:Label({Id = "style-note", Text = "기본형은 원본 자동플레이 계산을 사용합니다. 공격형은 득점 루트를 전부 탐색하고, 예술당구형은 계산 시간이 길수록 더 많은 기술구·예술구를 탐색하되 득점을 우선합니다. Alien·방어형은 별도 전략을 사용합니다."})
 
 		local settings = window:Tab({Id = "settings", Title = "설정"}):Section({Title = "GUI 크기·배율"})
 		settings:Label({Id = "settings-info", Text = "배율을 줄이면 글자·버튼·클릭 영역·간격이 함께 줄어듭니다."})
-		settings:Slider({Id = "gui-scale", Text = "전체 GUI 배율", Min = 0.85, Max = 1.5, Step = 0.05, Default = 1.0, Suffix = "x", Persist = false,
-			OnCommit = function(v) if window and window.Alive then window:SetTextScale(v) end end})
-		settings:Slider({Id = "gui-width", Text = "창 가로 크기", Min = 320, Max = 900, Step = 10, Default = 540, Suffix = "px", Persist = false,
-			OnCommit = function(v) if window and window.Alive then local g = window:GetGeometry(); window:SetGeometry({width = v, height = g.height, x = g.x, y = g.y}) end end})
-		settings:Slider({Id = "gui-height", Text = "창 세로 크기", Min = 300, Max = 850, Step = 10, Default = 540, Suffix = "px", Persist = false,
-			OnCommit = function(v) if window and window.Alive then local g = window:GetGeometry(); window:SetGeometry({width = g.width, height = v, x = g.x, y = g.y}) end end})
+		settings:Slider({Id = "gui-scale", Text = "전체 GUI 배율", Min = 0.85, Max = 1.5, Step = 0.05, Default = savedSettings.guiScale or 1.0, Suffix = "x", Persist = true,
+			OnCommit = function(v) if window and window.Alive then window:SetTextScale(v); saveSettings() end end})
+		settings:Slider({Id = "gui-width", Text = "창 가로 크기", Min = 320, Max = 900, Step = 10, Default = (savedSettings.geometry and savedSettings.geometry.width) or 540, Suffix = "px", Persist = true,
+			OnCommit = function(v) if window and window.Alive then local g = window:GetGeometry(); window:SetGeometry({width = v, height = g.height, x = g.x, y = g.y}); saveSettings() end end})
+		settings:Slider({Id = "gui-height", Text = "창 세로 크기", Min = 300, Max = 850, Step = 10, Default = (savedSettings.geometry and savedSettings.geometry.height) or 540, Suffix = "px", Persist = true,
+			OnCommit = function(v) if window and window.Alive then local g = window:GetGeometry(); window:SetGeometry({width = g.width, height = v, x = g.x, y = g.y}); saveSettings() end end})
 		settings:Button({Id = "gui-reset", Text = "GUI 크기 초기값", ActionText = "복원", Callback = function()
-			if window and window.Alive then window:SetTextScale(1); window:SetGeometry({width = 540, height = 540}) end
+			if window and window.Alive then window:SetTextScale(1); window:SetGeometry({width = 540, height = 540}); saveSettings() end
 		end})
 		local backgrounds = window:Tab({Id = "background", Title = "배경"}):Section({Title = "배경 스타일"})
 		backgrounds:Label({Id = "background-info", Text = "원하는 스타일을 고르면 전체 UI가 즉시 바뀝니다."})
-		backgrounds:Dropdown({Id = "background-theme", Text = "배경 선택", Placeholder = "스타일 선택", Default = "Crystal", Options = {
+		backgrounds:Dropdown({Id = "background-theme", Text = "배경 선택", Placeholder = "스타일 선택", Default = savedSettings.background or "Crystal", Persist = true, Options = {
 			{Value = "Crystal", Label = "Crystal · 크리스탈"}, {Value = "Crimson", Label = "Crimson · 크림슨"},
 			{Value = "Tidal", Label = "Tidal · 타이달"}, {Value = "Aurora", Label = "Aurora · 오로라"},
 			{Value = "Ember", Label = "Ember · 엠버"}, {Value = "Space", Label = "Space · 스페이스"}, {Value = "Prism", Label = "Prism · 프리즘 글로우"}, {Value = "Neon", Label = "Neon · 네온"}, {Value = "Cyber", Label = "Cyber · 사이버"}, {Value = "Sakura", Label = "Sakura · 사쿠라"}, {Value = "Forest", Label = "Forest · 포레스트"}, {Value = "Void", Label = "Void · 보이드"}, {Value = "CodexDark", Label = "Codex Dark"}, {Value = "CodexLight", Label = "Codex Light"}},
-			Callback = function(v) if window and window.Alive then window:SetTheme(v == "Prism" and "Crystal" or v); pcall(buildBackdrop, v) end end})
+			Callback = function(v) if window and window.Alive then window:SetTheme(v == "Prism" and "Crystal" or v); pcall(buildBackdrop, v); saveSettings() end end})
 		state.Window = window
-		window:OnDestroy(state.Stop)
+		if savedSettings.guiScale then window:SetTextScale(savedSettings.guiScale) end
+		if savedSettings.geometry then window:SetGeometry(savedSettings.geometry) end
+		if savedSettings.style then state.SetStyle(savedSettings.style) end
+		if savedSettings.preview ~= nil then preview.SetEnabled(savedSettings.preview == true) end
+		if savedSettings.strongPlay ~= nil then state.StrongPlay = savedSettings.strongPlay == true end
+		if savedSettings.smoothCue ~= nil then state.SetSmoothCue(savedSettings.smoothCue == true) end
+		if savedSettings.humanThinking ~= nil then state.HumanThinking = savedSettings.humanThinking == true end
+		if savedSettings.background then window:SetTheme(savedSettings.background == "Prism" and "Crystal" or savedSettings.background); pcall(buildBackdrop, savedSettings.background) end
+		if savedSettings.enabled == true then state.SetEnabled(true) end
+		loadingSettings = false
+		window:OnDestroy(function() saveSettings(); state.Stop() end)
 	end)
 	if not ok then state.UIError = tostring(err) warn("자동 플레이 창 오류: " .. state.UIError) end
 	heartbeat = runService.Heartbeat:Connect(function(dt)
